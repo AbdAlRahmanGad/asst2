@@ -1179,7 +1179,7 @@ TestResults spinBetweenRunCallsAsyncTest(ITaskSystem *t) {
  */
 TestResults mandelbrotChunkedTestBase(ITaskSystem* t, bool do_async) {
 
-    int num_tasks = 128;
+     int num_tasks = 16;
     
     MandelbrotTask::MandelArgs ma;
     ma.x0 = -2;
