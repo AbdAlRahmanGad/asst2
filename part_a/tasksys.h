@@ -85,16 +85,26 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
  * itasksys.h for documentation of the ITaskSystem interface.
  */
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
+    private:
+        std::vector<std::thread> threads;
+        int num_threads;
+        std::mutex* mutex_;
+        std::mutex* runMutex;
+        std::condition_variable*  parent_cv;
+        std::condition_variable*  threads_sleeping_cv;
+
+        int tasks_left;
+        int total_tasks;
+        int tasksDone;
+        bool finished;
+        IRunnable* runnable;
+        std::queue<int> q;
+        int taskCount;
     public:
         TaskSystemParallelThreadPoolSleeping(int num_threads);
         ~TaskSystemParallelThreadPoolSleeping();
         const char* name();
-        std::vector<std::thread> threads;
-        int num_threads;
-        std::queue<int> q;
-        std::atomic<int> taskCount;
-        std::mutex* mutex_;
-        std::condition_variable* cv;
+        void threadRun();
         void run(IRunnable* runnable, int num_total_tasks);
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
