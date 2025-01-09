@@ -243,6 +243,7 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping
                                                              , num_threads(num_of_threads)
                                                              , mutex_(new std::mutex())
                                                              , runMutex(new std::mutex())
+                                                             , threads_sleeping_mutex(new std::mutex())
                                                              , parent_cv(new std::condition_variable())
                                                              , threads_sleeping_cv(new std::condition_variable()) {
           total_tasks = -1;
@@ -258,19 +259,10 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping
 
 void TaskSystemParallelThreadPoolSleeping::threadRun() {
   while (true) {
-    {
-      std::unique_lock<std::mutex> lock(*mutex_);
 
-      while (tasks_left == 0 && !finished) {
-        threads_sleeping_cv->wait(
-            lock, [this]() { return finished || tasks_left > 0; });
-      }
-
-      if (finished) {
-        return;
-      }
+    if (finished) {
+      return;
     }
-
 
     int task = -1;
     {
@@ -293,17 +285,19 @@ void TaskSystemParallelThreadPoolSleeping::threadRun() {
           parent_cv->notify_all();
         }
       }
+    } else {
+        std::unique_lock<std::mutex> lock(*threads_sleeping_mutex);
+          while (tasks_left == 0 && !finished) {
+            threads_sleeping_cv->wait(lock);
+          }
     }
   }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    
-    {
-        std::lock_guard<std::mutex> lock(*mutex_);
-        finished = true;
-        threads_sleeping_cv->notify_all();
-    }
+
+    finished = true;
+    threads_sleeping_cv->notify_all();
 
     for (int i = 0; i < num_threads; i++) {
       TaskSystemParallelThreadPoolSleeping::threads[i].join();
