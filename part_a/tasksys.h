@@ -32,14 +32,15 @@ class TaskSystemSerial: public ITaskSystem {
  * of the ITaskSystem interface.
  */
 class TaskSystemParallelSpawn: public ITaskSystem {
+    private:
+        std::vector<std::thread> threads;
+        int num_threads;
+        std::mutex* mutex_;
     public:
         TaskSystemParallelSpawn(int num_threads);
         ~TaskSystemParallelSpawn();
         const char* name();
         void threadRun(IRunnable* runnable, int* task_num, int num_total_tasks);
-        std::vector<std::thread> threads;
-        int num_threads;
-        std::mutex* mutex_;
         void run(IRunnable* runnable, int num_total_tasks);
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
@@ -53,15 +54,24 @@ class TaskSystemParallelSpawn: public ITaskSystem {
  * documentation of the ITaskSystem interface.
  */
 class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
+    private:
+        std::vector<std::thread> threads;
+        int num_threads;
+        std::mutex* mutex_;
+        std::mutex* runMutex;
+        std::condition_variable* cv;
+
+        int total_tasks;
+        int tasksDone;
+        bool finished;
+        IRunnable* runnable;
+        std::queue<int> q;
+        int taskCount;
     public:
         TaskSystemParallelThreadPoolSpinning(int num_threads);
         ~TaskSystemParallelThreadPoolSpinning();
         const char* name();
-        std::vector<std::thread> threads;
-        int num_threads;
-        std::queue<int> q;
-        std::atomic<int> taskCount;
-        std::mutex* mutex_;
+        void threadRun();
         void run(IRunnable* runnable, int num_total_tasks);
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
