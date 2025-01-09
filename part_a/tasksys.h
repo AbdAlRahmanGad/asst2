@@ -36,7 +36,10 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         TaskSystemParallelSpawn(int num_threads);
         ~TaskSystemParallelSpawn();
         const char* name();
-
+        void threadRun(IRunnable* runnable, int* task_num, int num_total_tasks);
+        std::vector<std::thread> threads;
+        int num_threads;
+        std::mutex* mutex_;
         void run(IRunnable* runnable, int num_total_tasks);
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
