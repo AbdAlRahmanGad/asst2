@@ -55,9 +55,9 @@ const char* TaskSystemParallelSpawn::name() {
 }
 
 TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_of_threads): ITaskSystem(num_of_threads)
-                                                                    , num_threads(num_of_threads)
-                                                                    , threads(num_of_threads)
-                                                                    , mutex_(new std::mutex()) {
+                                                                       , threads(num_of_threads)
+                                                                       , num_threads(num_of_threads)
+                                                                       , mutex_(new std::mutex()) {
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {
@@ -121,25 +121,71 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
     return "Parallel + Thread Pool + Spin";
 }
 
-TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_of_threads): ITaskSystem(num_of_threads)
-                                                                                              , threads(num_of_threads)
-                                                                                              , num_threads(num_of_threads){
 
-    mutex_ = new std::mutex();
-    taskCount = 0;
 
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
-//    TaskSystemParallelThreadPoolSpinning::threads = std::vector<std::thread>(num_threads);
+TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning
+                                                (int num_of_threads): ITaskSystem(num_of_threads)
+                                                                       , threads(num_of_threads)
+                                                                       , num_threads(num_of_threads)
+                                                                       , mutex_(new std::mutex())
+                                                                       , runMutex(new std::mutex())
+                                                                       , cv(new std::condition_variable()) {
+  total_tasks = -1;
+  taskCount = -1;
+  tasksDone = 0;
+  finished = false;
+  for (int i = 0; i < num_threads; i++) {
+        threads[i] = std::thread(&TaskSystemParallelThreadPoolSpinning::threadRun, this);
+  }
 
 }
 
+
+void TaskSystemParallelThreadPoolSpinning::threadRun() {
+    while (true) {
+        // Check for shutdown signal
+        {
+            std::lock_guard<std::mutex> lock(*mutex_);
+            if (finished) {
+                return;
+            }
+        }
+
+        int task = -1;
+        // Try to get a task
+        {
+            std::lock_guard<std::mutex> lock(*mutex_);
+            if (taskCount < total_tasks) {
+                task = taskCount++;
+            }
+        }
+
+        // Process task if valid
+        if (task >= 0 && task < total_tasks) {
+            runnable->runTask(task, total_tasks);
+
+            // Update completion status
+            {
+                std::lock_guard<std::mutex> lock(*mutex_);
+                tasksDone++;
+                if (tasksDone == total_tasks) {
+                    runMutex->lock();
+                    runMutex->unlock();
+                    cv->notify_one();  // Signal completion
+                }
+            }
+        }
+    }
+}
+
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
+    finished = true;
+    for (int i = 0; i < num_threads; i++) {
+      TaskSystemParallelThreadPoolSpinning::threads[i].join();
+    }
     delete mutex_;
+    delete runMutex;
+    runnable = nullptr;
 }
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
@@ -152,55 +198,19 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     //
 
     /// static or dynamic assignment of threads?
+    /// dynamic assignment of threads because workloads are not known
 
-    /// static + no busy waiting
-    for (int i = 0; i < TaskSystemParallelThreadPoolSpinning::num_threads; i++) {
+    /// dynamic + busy waiting
 
-        TaskSystemParallelThreadPoolSpinning::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
-
-            for (int j = i; j < num_total_tasks; j += num_threads)
-                runnable->runTask(j, num_total_tasks);
-         });
-
-    }
-
-
-    for (int i = 0; i < num_threads; i++) {
-        TaskSystemParallelThreadPoolSpinning::threads[i].join();
-    }
-return;
-    /// dynamic + busy waiting + atomic
-    for (int i =0; i < num_total_tasks; i++){
-//        q.push(i);
-        taskCount++;
-    }
-//    std::cout << taskCount;
-//    mutex
-    for (int i = 0; i < TaskSystemParallelThreadPoolSpinning::num_threads; i++) {
-
-        TaskSystemParallelThreadPoolSpinning::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
-
-//            while (true) {
-//                while(taskCount == 0) {}
-//                while(taskCount > 0 ) {
-                mutex_->lock();
-//                int task = q.front();
-//                q.pop();
-                int task = --taskCount;
-                mutex_->unlock();
-
-                runnable->runTask(task, num_total_tasks);
-//                }
-//                taskCount = -1;
-//                            }
-         });
-
-    }
-
-        for (int i = 0; i < num_threads; i++) {
-            TaskSystemParallelThreadPoolSpinning::threads[i].join();
-        }
-
+    std::unique_lock<std::mutex> lk(*runMutex);
+    mutex_->lock();
+    taskCount = 0;
+    this->runnable = runnable;
+    total_tasks = num_total_tasks;
+    tasksDone = 0;
+    mutex_->unlock();
+    cv->wait(lk);
+    lk.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
