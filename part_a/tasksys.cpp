@@ -54,16 +54,28 @@ const char* TaskSystemParallelSpawn::name() {
     return "Parallel + Always Spawn";
 }
 
-TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_of_threads): ITaskSystem(num_of_threads)
+                                                                    , num_threads(num_of_threads)
+                                                                    , threads(num_of_threads)
+                                                                    , mutex_(new std::mutex()) {
 }
 
-TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
+TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {
+    delete mutex_;
+}
+
+void TaskSystemParallelSpawn::threadRun(IRunnable* runnable, int* task_num, int num_total_tasks) {
+  int task = -1;
+  while (task < num_total_tasks) {
+    mutex_->lock();
+    task = (*task_num)++;
+    mutex_->unlock();
+
+    if (task >= num_total_tasks) break;
+
+    runnable->runTask(task, num_total_tasks);
+  }
+}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
 
@@ -73,17 +85,19 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
     // method in Part A.  The implementation provided below runs all
     // tasks sequentially on the calling thread.
     //
-    std::thread threads[num_total_tasks];
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        threads[i] = std::thread([runnable, i, num_total_tasks]() {
-             runnable->runTask(i, num_total_tasks);
-         });
+    /// dynamic assignment of threads because workloads are not known
+    int *task_num = new int;
+    *task_num = 0;
+    for (int i = 0; i < num_threads; i++) {
+        threads[i] = std::thread(&TaskSystemParallelSpawn::threadRun, this, runnable, task_num, num_total_tasks);
     }
 
-    for (int i = 0; i < num_total_tasks; i++) {
+    for (int i = 0; i < num_threads; i++) {
         threads[i].join();
     }
+
+    delete task_num;
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
@@ -140,21 +154,21 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     /// static or dynamic assignment of threads?
 
     /// static + no busy waiting
-//    for (int i = 0; i < TaskSystemParallelThreadPoolSpinning::num_threads; i++) {
-//
-//        TaskSystemParallelThreadPoolSpinning::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
-//
-//            for (int j = i; j < num_total_tasks; j += num_threads)
-//                runnable->runTask(j, num_total_tasks);
-//         });
-//
-//    }
-//
-//
-//    for (int i = 0; i < num_threads; i++) {
-//        TaskSystemParallelThreadPoolSpinning::threads[i].join();
-//    }
+    for (int i = 0; i < TaskSystemParallelThreadPoolSpinning::num_threads; i++) {
 
+        TaskSystemParallelThreadPoolSpinning::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
+
+            for (int j = i; j < num_total_tasks; j += num_threads)
+                runnable->runTask(j, num_total_tasks);
+         });
+
+    }
+
+
+    for (int i = 0; i < num_threads; i++) {
+        TaskSystemParallelThreadPoolSpinning::threads[i].join();
+    }
+return;
     /// dynamic + busy waiting + atomic
     for (int i =0; i < num_total_tasks; i++){
 //        q.push(i);
@@ -244,30 +258,30 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     // tasks sequentially on the calling thread.
     //
     /// dynamic + busy waiting + atomic
-    for (int i = 0; i < TaskSystemParallelThreadPoolSleeping::num_threads; i++) {
-
-        TaskSystemParallelThreadPoolSleeping::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
-
-            std::unique_lock<std::mutex> lk(*mutex_);
-
-            while(taskCount == 0) {
-                cv->wait(lk);
-            }
-                int task = q.front();
-                q.pop();
-                taskCount--;
-
-                runnable->runTask(task, num_total_tasks);
-                lk.unlock();
-
-         });
-
-    }
-
-    for (int i =0; i < num_total_tasks; i++){
-        q.push(i);
-        taskCount++;
-    }
+//    for (int i = 0; i < TaskSystemParallelThreadPoolSleeping::num_threads; i++) {
+//
+//        TaskSystemParallelThreadPoolSleeping::threads[i] = std::thread([runnable, i, num_total_tasks, this]() {
+//
+//            std::unique_lock<std::mutex> lk(*mutex_);
+//
+//            while(taskCount == 0) {
+//                cv->wait(lk);
+//            }
+//                int task = q.front();
+//                q.pop();
+//                taskCount--;
+//
+//                runnable->runTask(task, num_total_tasks);
+//                lk.unlock();
+//
+//         });
+//
+//    }
+//
+//    for (int i =0; i < num_total_tasks; i++){
+//        q.push(i);
+//        taskCount++;
+//    }
 //    cv->notify_all();
 
 
