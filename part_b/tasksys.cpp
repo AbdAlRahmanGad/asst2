@@ -147,6 +147,8 @@ TaskSystemParallelThreadPoolSleeping::
     task_id = 0;
     task_id_mutex = new std::mutex();
     waitingForDeps_cv = new std::condition_variable();
+    sync_cv = new std::condition_variable();
+    syncing = false;
     waitingForDepsQueueMutex = new std::mutex();
     runningQueueMutex = new std::mutex();
     runningQueue = std::queue<workingTask>();
@@ -164,8 +166,19 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
   while (true) {
     if (thread_id == 0) {
       std::unique_lock<std::mutex> lock(*waitingForDepsQueueMutex);
-      if (waitingForDepsQueue.empty()) {
+      if (syncing) {
+        waitingForDeps_cv->notify_all();
+        lock.unlock();
+        lock.lock();
+         std::unique_lock<std::mutex> lock(*runningQueueMutex);
+          if (runningQueue.empty() && waitingForDepsQueue.empty()) {
+            sync_cv->notify_all();
+          }
+      }
+      if (waitingForDepsQueue.empty() && !finished) {
         waitingForDeps_cv->wait(lock);
+      } else if (finished) {
+        return;
       } else {
         for (auto& it: waitingForDepsQueue) {
           bool allDepsFinished = true;
@@ -184,9 +197,8 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
             task.task_now = 0;
             std::unique_lock<std::mutex> lock(*runningQueueMutex);
             runningQueue.push(task);
-
             /// Notify the threads to start working
-            threads_sleeping_cv->notify_all();///// TODO: check again if this is correct
+            threads_sleeping_cv->notify_all();
             runningQueueMutex->unlock();
             waitingForDepsQueue.erase(it);
             break;
@@ -248,8 +260,11 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 
 {
   std::lock_guard<std::mutex> lock(*runningQueueMutex);
+  std::lock_guard<std::mutex> lock2(*waitingForDepsQueueMutex);
+
   finished = true;
   threads_sleeping_cv->notify_all();
+  waitingForDeps_cv->notify_all();
 }
   for (int i = 0; i < num_threads; i++) {
     TaskSystemParallelThreadPoolSleeping::threads[i].join();
@@ -322,5 +337,11 @@ void TaskSystemParallelThreadPoolSleeping::sync() {
     // TODO: CS149 students will modify the implementation of this method in Part B.
     //
 
+    std::unique_lock<std::mutex> lock(*waitingForDepsQueueMutex);
+    waitingForDeps_cv->notify_all();
+    syncing = true;
+    sync_cv->wait(lock);
+    syncing = false;
+    lock.unlock();
     return;
 }
