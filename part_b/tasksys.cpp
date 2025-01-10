@@ -5,6 +5,10 @@
 #include <atomic>
 #include <iostream>
 #include <condition_variable>
+#include <unordered_set>
+#include <queue>
+#include <map>
+
 
 IRunnable::~IRunnable() {}
 
@@ -131,76 +135,131 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
     return "Parallel + Thread Pool + Sleep";
 }
 
-TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping
-                                      (int num_of_threads): ITaskSystem(num_of_threads)
-                                                             , threads(num_of_threads)
-                                                             , num_threads(num_of_threads)
-                                                             , mutex_(new std::mutex())
-                                                             , runMutex(new std::mutex())
-                                                             , threads_sleeping_mutex(new std::mutex())
-                                                             , parent_cv(new std::condition_variable())
-                                                             , threads_sleeping_cv(new std::condition_variable()) {
-    total_tasks = -1;
-    tasks_left = 0;
-    taskCount = -1;
-    tasksDone = 0;
+TaskSystemParallelThreadPoolSleeping::
+    TaskSystemParallelThreadPoolSleeping
+    (int num_of_threads): ITaskSystem(num_of_threads)
+                         , threads(num_of_threads)
+                         , num_threads(num_of_threads)
+                         , tasksDoneMutex(new std::mutex())
+                         , threads_sleeping_mutex(new std::mutex())
+                         , threads_sleeping_cv(new std::condition_variable())
+{
+    task_id = 0;
+    task_id_mutex = new std::mutex();
+    waitingForDeps_cv = new std::condition_variable();
+    waitingForDepsQueueMutex = new std::mutex();
+    runningQueueMutex = new std::mutex();
+    runningQueue = std::queue<workingTask>();
+    waitingForDepsQueue = std::unordered_set<waitingTask>();
+    finishedTasks = std::map<TaskID, bool>();
+    tasksDone = std::map<TaskID, int>();
     finished = false;
     for (int i = 0; i < num_threads; i++) {
-      threads[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::threadRun, this);
+      threads[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::threadRun, this, i);
     }
 
 }
 
-void TaskSystemParallelThreadPoolSleeping::threadRun() {
+void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
   while (true) {
+    if (thread_id == 0) {
+      std::unique_lock<std::mutex> lock(*waitingForDepsQueueMutex);
+      if (waitingForDepsQueue.empty()) {
+        waitingForDeps_cv->wait(lock);
+      } else {
+        for (auto& it: waitingForDepsQueue) {
+          bool allDepsFinished = true;
+          for (auto& dep: it.deps) {
+            if (!finishedTasks[dep]) {
+              allDepsFinished = false;
+              break;
+            }
+          }
+          if (allDepsFinished) {
+            workingTask task;
+            task.task_id = it.task_id;
+            task.num_total_tasks = it.num_total_tasks;
+            task.runnable = it.runnable;
+            task.tasks_left = it.num_total_tasks;
+            task.task_now = 0;
+            std::unique_lock<std::mutex> lock(*runningQueueMutex);
+            runningQueue.push(task);
+
+            /// Notify the threads to start working
+            threads_sleeping_cv->notify_all();///// TODO: check again if this is correct
+            runningQueueMutex->unlock();
+            waitingForDepsQueue.erase(it);
+            break;
+          }
+        }
+      }
+
+    } else {
 
     if (finished) {
       return;
     }
 
-    int task = -1;
+    workingTask taskToRun;
+    taskToRun.task_now = -1;
+
     {
-      std::lock_guard<std::mutex> lock(*mutex_);
-      if (taskCount < total_tasks) {
-        task = taskCount++;
+      std::lock_guard<std::mutex> lock(*runningQueueMutex);
+      if (!runningQueue.empty()) {
+        if (runningQueue.front().task_now < runningQueue.front().num_total_tasks) {
+          taskToRun = runningQueue.front();
+          runningQueue.front().task_now++;
+        } else {
+          runningQueue.pop();
+          if (runningQueue.empty()) {
+            taskToRun.task_now = -10;
+          }
+        }
+      } else {
+        taskToRun.task_now = -10;
+      }
+    }
+    
+    if (taskToRun.task_now >= 0 && taskToRun.task_now < taskToRun.num_total_tasks) {
+      taskToRun.runnable->runTask(taskToRun.task_now, taskToRun.num_total_tasks);
+
+      {
+        std::lock_guard<std::mutex> lock(*tasksDoneMutex);
+        tasksDone[taskToRun.task_id]++;
+        if (tasksDone[taskToRun.task_id] == taskToRun.num_total_tasks) {
+          waitingForDepsQueueMutex->lock();
+          waitingForDepsQueueMutex->unlock();
+          waitingForDeps_cv->notify_all();
+        }
+      }
+    } else if (taskToRun.task_now == -10) {
+      // TODO: maybe lock should be on threads_sleeping_mutex
+      std::unique_lock<std::mutex> lock(*runningQueueMutex);
+      while (runningQueue.empty() && !finished) {
+        threads_sleeping_cv->wait(lock);
       }
     }
 
-    if (task >= 0 && task < total_tasks) {
-      runnable->runTask(task, total_tasks);
-
-      {
-        std::lock_guard<std::mutex> lock(*mutex_);
-        tasksDone++;
-        tasks_left--;
-        if (tasksDone == total_tasks) {
-          runMutex->lock();
-          runMutex->unlock();
-          parent_cv->notify_all();
-        }
-      }
-    } else {
-      std::unique_lock<std::mutex> lock(*threads_sleeping_mutex);
-      while (tasks_left == 0 && !finished) {
-        threads_sleeping_cv->wait(lock);
-      }
     }
   }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 
+{
+  std::lock_guard<std::mutex> lock(*runningQueueMutex);
   finished = true;
   threads_sleeping_cv->notify_all();
-
+}
   for (int i = 0; i < num_threads; i++) {
     TaskSystemParallelThreadPoolSleeping::threads[i].join();
   }
-  delete mutex_;
-  delete runMutex;
-  delete parent_cv;
+  delete task_id_mutex;
+  delete waitingForDeps_cv;
+  delete waitingForDepsQueueMutex;
+  delete runningQueueMutex;
+  delete tasksDoneMutex;
   delete threads_sleeping_cv;
-  runnable = nullptr;
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
@@ -214,17 +273,21 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
 
   /// dynamic + sleep when no work
 
-  std::unique_lock<std::mutex> lk(*runMutex);
-  mutex_->lock();
-  taskCount = 0;
-  this->runnable = runnable;
-  tasks_left = num_total_tasks;
-  total_tasks = num_total_tasks;
-  tasksDone = 0;
-  threads_sleeping_cv->notify_all();
-  mutex_->unlock();
-  parent_cv->wait(lk);
-  lk.unlock();
+    for (int i = 0; i < num_total_tasks; i++) {
+        runnable->runTask(i, num_total_tasks);
+    }
+
+  // std::unique_lock<std::mutex> lk(*runMutex);
+  // mutex_->lock();
+  // taskCount = 0;
+  // this->runnable = runnable;
+  // tasks_left = num_total_tasks;
+  // total_tasks = num_total_tasks;
+  // tasksDone = 0;
+  // threads_sleeping_cv->notify_all();
+  // mutex_->unlock();
+  // parent_cv->wait(lk);
+  // lk.unlock();
 }
 
 
@@ -236,11 +299,21 @@ TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnabl
     // TODO: CS149 students will implement this method in Part B.
     //
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
+    /// Put the task in the waiting queue
+    waitingTask task;
+    task_id_mutex->lock();
+    task.task_id = task_id++;
+    task_id_mutex->unlock();
+    task.num_total_tasks = num_total_tasks;
+    task.runnable = runnable;
+    task.deps = deps;
 
-    return 0;
+    std::unique_lock<std::mutex> lock(*waitingForDepsQueueMutex);
+    waitingForDepsQueue.insert(task);
+    waitingForDeps_cv->notify_all();
+    lock.unlock();
+
+    return task.task_id;
 }
 
 void TaskSystemParallelThreadPoolSleeping::sync() {
