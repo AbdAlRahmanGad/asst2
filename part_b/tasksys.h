@@ -2,6 +2,12 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <atomic>
+#include <iostream>
+#include <condition_variable>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -59,15 +65,32 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
  * a thread pool. See definition of ITaskSystem in
  * itasksys.h for documentation of the ITaskSystem interface.
  */
+
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
-    public:
-        TaskSystemParallelThreadPoolSleeping(int num_threads);
-        ~TaskSystemParallelThreadPoolSleeping();
-        const char* name();
-        void run(IRunnable* runnable, int num_total_tasks);
-        TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
-                                const std::vector<TaskID>& deps);
-        void sync();
+  private:
+      std::vector<std::thread> threads;
+      int num_threads;
+      std::mutex* mutex_;
+      std::mutex* runMutex;
+      std::mutex* threads_sleeping_mutex;
+      std::condition_variable*  parent_cv;
+      std::condition_variable*  threads_sleeping_cv;
+
+      std::atomic<int> tasks_left;
+      int total_tasks;
+      int tasksDone;
+      bool finished;
+      IRunnable* runnable;
+      int taskCount;
+  public:
+      TaskSystemParallelThreadPoolSleeping(int num_threads);
+      ~TaskSystemParallelThreadPoolSleeping();
+      const char* name();
+      void threadRun();
+      void run(IRunnable* runnable, int num_total_tasks);
+      TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
+                              const std::vector<TaskID>& deps);
+      void sync();
 };
 
 #endif
