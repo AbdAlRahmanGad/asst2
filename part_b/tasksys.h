@@ -8,6 +8,8 @@
 #include <atomic>
 #include <iostream>
 #include <condition_variable>
+#include <unordered_set>
+#include <map>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -66,27 +68,46 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
  * itasksys.h for documentation of the ITaskSystem interface.
  */
 
+class waitingTask {
+    public:
+        int task_id;
+        int num_total_tasks;
+        IRunnable* runnable;
+        std::vector<TaskID> deps;
+};
+
+class workingTask {
+    public:
+        int task_id;
+        int task_now;
+        int tasks_left;
+        int num_total_tasks;
+        IRunnable* runnable;
+};
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
   private:
       std::vector<std::thread> threads;
       int num_threads;
-      std::mutex* mutex_;
-      std::mutex* runMutex;
+      std::mutex* runningQueueMutex;
+      std::mutex* waitingForDepsQueueMutex;
+      std::mutex* tasksDoneMutex;
+      std::mutex* task_id_mutex;
       std::mutex* threads_sleeping_mutex;
-      std::condition_variable*  parent_cv;
       std::condition_variable*  threads_sleeping_cv;
+      std::condition_variable*  waitingForDeps_cv;
 
-      std::atomic<int> tasks_left;
-      int total_tasks;
-      int tasksDone;
+      std::map<TaskID, bool> finishedTasks;
+      std::map<TaskID, int> tasksDone;
+
+      TaskID task_id;
       bool finished;
-      IRunnable* runnable;
-      int taskCount;
+      std::queue<workingTask> runningQueue;
+      std::unordered_set<waitingTask> waitingForDepsQueue;
   public:
       TaskSystemParallelThreadPoolSleeping(int num_threads);
       ~TaskSystemParallelThreadPoolSleeping();
       const char* name();
-      void threadRun();
+      void threadRun(int thread_id);
       void run(IRunnable* runnable, int num_total_tasks);
       TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                               const std::vector<TaskID>& deps);
