@@ -74,6 +74,10 @@ class waitingTask {
         int num_total_tasks;
         IRunnable* runnable;
         std::vector<TaskID> deps;
+
+        bool operator==(const waitingTask& other) const {
+            return task_id == other.task_id;
+        }
 };
 
 class workingTask {
@@ -84,6 +88,16 @@ class workingTask {
         int num_total_tasks;
         IRunnable* runnable;
 };
+
+namespace std {
+    template <>
+    struct hash<waitingTask> {
+        std::size_t operator()(const waitingTask& k) const {
+            return std::hash<int>()(k.task_id);
+        }
+    };
+}
+
 class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
   private:
       std::vector<std::thread> threads;
@@ -95,11 +109,15 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
       std::mutex* threads_sleeping_mutex;
       std::condition_variable*  threads_sleeping_cv;
       std::condition_variable*  waitingForDeps_cv;
+      std::condition_variable*  sync_cv;
+
+
 
       std::map<TaskID, bool> finishedTasks;
       std::map<TaskID, int> tasksDone;
 
       TaskID task_id;
+      bool syncing;
       bool finished;
       std::queue<workingTask> runningQueue;
       std::unordered_set<waitingTask> waitingForDepsQueue;
