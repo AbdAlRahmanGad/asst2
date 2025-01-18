@@ -168,12 +168,11 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
       std::unique_lock<std::mutex> lock(*waitingForDepsQueueMutex);
       if (syncing) {
         waitingForDeps_cv->notify_all();
-        lock.unlock();
-        lock.lock();
          std::unique_lock<std::mutex> lock(*runningQueueMutex);
           if (runningQueue.empty() && waitingForDepsQueue.empty()) {
             sync_cv->notify_all();
           }
+          lock.unlock();
       }
       if (waitingForDepsQueue.empty() && !finished) {
         waitingForDeps_cv->wait(lock);
@@ -199,7 +198,7 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
             runningQueue.push(task);
             /// Notify the threads to start working
             threads_sleeping_cv->notify_all();
-            runningQueueMutex->unlock();
+            lock.unlock();
             waitingForDepsQueue.erase(it);
             break;
           }
@@ -236,12 +235,16 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
       taskToRun.runnable->runTask(taskToRun.task_now, taskToRun.num_total_tasks);
 
       {
-        std::lock_guard<std::mutex> lock(*tasksDoneMutex);
+        std::unique_lock<std::mutex> lock(*tasksDoneMutex);
         tasksDone[taskToRun.task_id]++;
         if (tasksDone[taskToRun.task_id] == taskToRun.num_total_tasks) {
+            lock.unlock();
           waitingForDepsQueueMutex->lock();
-          waitingForDepsQueueMutex->unlock();
+          lock.lock();
+          finishedTasks[taskToRun.task_id] = true;
+          lock.unlock();
           waitingForDeps_cv->notify_all();
+          waitingForDepsQueueMutex->unlock();
         }
       }
     } else if (taskToRun.task_now == -10) {
@@ -259,8 +262,9 @@ void TaskSystemParallelThreadPoolSleeping::threadRun(int thread_id) {
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 
 {
-  std::lock_guard<std::mutex> lock(*runningQueueMutex);
   std::lock_guard<std::mutex> lock2(*waitingForDepsQueueMutex);
+  std::lock_guard<std::mutex> lock(*runningQueueMutex);
+
 
   finished = true;
   threads_sleeping_cv->notify_all();

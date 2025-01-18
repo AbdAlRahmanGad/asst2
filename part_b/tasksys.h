@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <unordered_set>
 #include <map>
+#include <queue>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
