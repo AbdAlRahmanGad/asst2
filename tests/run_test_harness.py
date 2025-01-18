@@ -27,17 +27,22 @@ PERF_THRESHOLD = 1.2
 NUM_TEST_RUNS = 5
 
 LIST_OF_TESTS = [
-    ("super_super_light", UNSPECIFIED_NUM_THREADS),
-    ("super_light", UNSPECIFIED_NUM_THREADS),
-    ("ping_pong_equal", UNSPECIFIED_NUM_THREADS),
-    ("ping_pong_unequal", UNSPECIFIED_NUM_THREADS),
-    ("recursive_fibonacci", UNSPECIFIED_NUM_THREADS),
-    ("math_operations_in_tight_for_loop", UNSPECIFIED_NUM_THREADS),
-    ("math_operations_in_tight_for_loop_fewer_tasks", UNSPECIFIED_NUM_THREADS),
-    ("math_operations_in_tight_for_loop_fan_in", UNSPECIFIED_NUM_THREADS),
-    ("math_operations_in_tight_for_loop_reduction_tree", UNSPECIFIED_NUM_THREADS),
-    ("spin_between_run_calls", UNSPECIFIED_NUM_THREADS),
-    ("mandelbrot_chunked", UNSPECIFIED_NUM_THREADS),
+    ("ping_pong_equal_async", UNSPECIFIED_NUM_THREADS), # too slow [Parallel + Thread Pool + Sleep]        1493.879  228.594     6.54  (NOT OK)
+    ("ping_pong_unequal_async", UNSPECIFIED_NUM_THREADS), # a little bit slower [Parallel + Thread Pool + Sleep]        834.757   383.606     2.18  (NOT OK)
+    ("super_light_async", UNSPECIFIED_NUM_THREADS), #  too slow [Parallel + Thread Pool + Sleep]        1593.767  39.253      40.60  (NOT OK)
+    ("super_super_light_async", UNSPECIFIED_NUM_THREADS), #  too slow[Parallel + Thread Pool + Sleep]        1566.371  77.653      20.17  (NOT OK)
+    ("recursive_fibonacci_async", UNSPECIFIED_NUM_THREADS), # Good
+    ("math_operations_in_tight_for_loop_async", UNSPECIFIED_NUM_THREADS), # deadlock
+    ("math_operations_in_tight_for_loop_fewer_tasks_async", UNSPECIFIED_NUM_THREADS), # Good
+    ("math_operations_in_tight_for_loop_fan_in_async", UNSPECIFIED_NUM_THREADS), # Good but not consistent
+    ("math_operations_in_tight_for_loop_reduction_tree_async", UNSPECIFIED_NUM_THREADS),  # Good
+    ("mandelbrot_chunked_async", UNSPECIFIED_NUM_THREADS), # Good
+    ("spin_between_run_calls_async", UNSPECIFIED_NUM_THREADS), # Good
+    ("simple_run_deps_test", UNSPECIFIED_NUM_THREADS),
+    ("strict_diamond_deps_async", UNSPECIFIED_NUM_THREADS), # almost good (a little bit slower)
+    ("strict_graph_deps_small_async", UNSPECIFIED_NUM_THREADS),  # Good but not consistent
+    ("strict_graph_deps_med_async", UNSPECIFIED_NUM_THREADS),   # Good but not consistent
+    ("strict_graph_deps_large_async", UNSPECIFIED_NUM_THREADS), # deadlock
 ]
 
 LIST_OF_IMPLEMENTATIONS_ORIG = [
